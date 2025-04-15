@@ -1,7 +1,7 @@
 import cv2
 import torch
 from ultralytics import YOLO
-from sort.sort import Sort  # 导入本地的SORT实现
+from sort import Sort  # 导入本地的SORT实现
 # 初始化YOLO模型和SORT追踪器
 model = YOLO("yolov8n.pt")
 tracker = Sort()

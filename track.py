@@ -2,7 +2,7 @@ import cv2
 import torch
 import asyncio
 from ultralytics import YOLO
-from sort.sort import Sort
+from sort import Sort
 
 class AsyncObjectTracker:
     def __init__(self, model_path="yolov8n.pt", stable_frames_threshold=48, verbose=False):
