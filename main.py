@@ -1,20 +1,19 @@
 import asyncio
-from track import AsyncObjectTracker
+from track import Tracker
 import time
 
 async def main():
     # 初始化异步对象追踪器，设置verbose=False来禁止YOLO输出
-    tracker = AsyncObjectTracker(
+    tracker = Tracker(
         model_path="yolov8n.pt", 
         stable_frames_threshold=48,
-        verbose=True,  # 这里设置为False来禁止YOLO输出
-        tracker="deep_sort"
+        verbose=False,  # 这里设置为False来禁止YOLO输出
+        tracker="sort"
     )
 
     # 启动追踪任务
     video_source = "traffic.avi"  # 或者使用摄像头：video_source = 0
     tracking_task = asyncio.create_task(tracker.track_objects(video_source))
-    await tracking_task
     # 设置运行时间为30秒
     start_time = time.time()
 
