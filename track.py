@@ -3,9 +3,9 @@ import torch
 import asyncio
 from ultralytics import YOLO
 from sort import Sort
-
+from deep_sort_realtime.deepsort_tracker import DeepSort
 class AsyncObjectTracker:
-    def __init__(self, model_path="yolov8n.pt", stable_frames_threshold=48, verbose=False):
+    def __init__(self, model_path="yolov8n.pt", stable_frames_threshold=48, verbose=False, tracker = "sort"):
         """
         初始化异步对象追踪器
         
@@ -14,8 +14,13 @@ class AsyncObjectTracker:
             stable_frames_threshold: 稳定帧数阈值
             verbose: 是否显示详细输出
         """
+        self.tracker_choice = tracker
         self.model = YOLO(model_path)
-        self.tracker = Sort()
+        if tracker == "sort":
+            self.tracker = Sort()
+        elif tracker == "deep_sort":
+            self.tracker = DeepSort()
+        
         self.stable_frames_threshold = stable_frames_threshold
         self.tracked_objects_history = {}
         self.current_detections = []
@@ -37,23 +42,38 @@ class AsyncObjectTracker:
         
         # 提取检测框信息
         detections = []
+        detections_deepsort = []
         for result in results:
             for box in result.boxes:
                 x1, y1, x2, y2, conf, cls = box.xyxy[0].tolist() + [box.conf[0].item(), box.cls[0].item()]
                 detections.append([x1, y1, x2, y2, conf])
+                w, h = x2 - x1, y2 - y1
+                class_name = self.model.names[int(cls)]
+                detections_deepsort.append(([x1, y1, w, h], conf, class_name))
         
         # 更新SORT追踪器
-        tracked_objects = self.tracker.update(torch.tensor(detections))
+        if self.tracker_choice == "sort":
+            tracked_objects = self.tracker.update(torch.tensor(detections))
+        elif self.tracker_choice == "deep_sort":
+            tracked_objects = self.tracker.update_tracks(detections_deepsort, frame=frame)
         
         # 更新每个对象的ID及其出现的帧数
         current_frame_ids = set()
         for obj in tracked_objects:
-            obj_id = int(obj[4])
-            current_frame_ids.add(obj_id)
-            if obj_id in self.tracked_objects_history:
-                self.tracked_objects_history[obj_id] += 1
-            else:
-                self.tracked_objects_history[obj_id] = 1
+            if self.tracker_choice == "sort":
+                obj_id = int(obj[4])
+                current_frame_ids.add(obj_id)
+                if obj_id in self.tracked_objects_history:
+                    self.tracked_objects_history[obj_id] += 1
+                else:
+                    self.tracked_objects_history[obj_id] = 1
+            elif self.tracker_choice == "deep_sort":
+                obj_id = obj.track_id
+                current_frame_ids.add(obj_id)
+                if obj_id in self.tracked_objects_history:
+                    self.tracked_objects_history[obj_id] += 1
+                else:
+                    self.tracked_objects_history[obj_id] = 1
         
         # 移除在当前帧中未出现的对象
         for obj_id in list(self.tracked_objects_history.keys()):
@@ -63,23 +83,42 @@ class AsyncObjectTracker:
         # 存储当前检测结果
         self.current_detections = []
         for obj in tracked_objects:
-            obj_id = int(obj[4])
-            if self.tracked_objects_history.get(obj_id, 0) >= self.stable_frames_threshold:
-                x1, y1, x2, y2 = obj[:4].astype(int)
-                self.current_detections.append({
-                    'id': obj_id,
-                    'bbox': (x1, y1, x2, y2),
-                    'age': self.tracked_objects_history[obj_id],
-                    'class': self.model.names[int(obj[5])] if len(obj) > 5 else 'unknown'
-                })
-                
-                # 绘制追踪结果
-                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                cv2.putText(frame, f'ID: {obj_id}', (x1, y1 - 10), 
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
+            if self.tracker_choice == "sort":
+                obj_id = int(obj[4])
+                if self.tracked_objects_history.get(obj_id, 0) >= self.stable_frames_threshold:
+                    x1, y1, x2, y2 = obj[:4].astype(int)
+                    class_id = int(obj[5]) if len(obj) > 5 else -1
+                    self.current_detections.append({
+                        'id': obj_id,
+                        'bbox': (x1, y1, x2, y2),
+                        'age': self.tracked_objects_history[obj_id],
+                        'class': self.model.names[class_id] if class_id != -1 else 'unknown'
+                    })
+                    
+                    # 绘制追踪结果
+                    cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                    cv2.putText(frame, f'ID: {obj_id}', (x1, y1 - 10), 
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
+            
+            elif self.tracker_choice == "deep_sort":
+                obj_id = obj.track_id
+                if self.tracked_objects_history.get(obj_id, 0) >= self.stable_frames_threshold:
+                    bbox = obj.to_ltrb()  # 获取边界框坐标 [left, top, right, bottom]
+                    x1, y1, x2, y2 = map(int, bbox)
+                    class_id = obj.get_det_class() if hasattr(obj, 'get_det_class') else -1
+                    self.current_detections.append({
+                        'id': obj_id,
+                        'bbox': (x1, y1, x2, y2),
+                        'age': self.tracked_objects_history[obj_id],
+                        #'class': self.model.names[class_id] if class_id != -1 else 'unknown'
+                    })
+                    
+                    # 绘制追踪结果
+                    cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                    cv2.putText(frame, f'ID: {obj_id}', (x1, y1 - 10), 
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
         
         return frame
-    
     async def track_objects(self, video_source):
         """
         异步追踪视频流中的对象
