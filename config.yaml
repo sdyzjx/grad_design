@@ -1,0 +1,8 @@
+# 服务器配置
+server: "https://api.example.com/v1"
+
+# 客户端标识
+client_id: "client_12345"
+
+# 检测间隔时间(秒)
+detect_time: 5
