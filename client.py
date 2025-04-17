@@ -9,7 +9,7 @@ from datetime import *
 import aioconsole
 import websockets
 import json
-
+import util
 class wsClient:
     def __init__(self, _address, _id, detect_time, tracker):
         self.address = _address
@@ -20,6 +20,7 @@ class wsClient:
         self.heartbeat = False
         self.detect_time = detect_time
         self.tracker = tracker
+        self.detection_queue = deque([])
         # fetch initial server config
         # asyncio.run(self.client_start(mac, address, client_id))
 
@@ -36,7 +37,7 @@ class wsClient:
     async def client_start(self):
         async with websockets.connect(self.address) as self.ws:
             msg = {
-                "id": self.client_id,
+                "client_id": self.client_id,
                 "action": "100"
             }
             json_data = json.dumps(msg)
@@ -53,13 +54,11 @@ class wsClient:
                     await self.recv_send_handler()
 
     async def recv_send_handler(self):
+        print("开始发送")
         while self.connected:
             try:
-                if len(self.detection_queue) != 0:
-                    obj_json = json.dumps(self.detection_queue.popleft())
-                    await self.ws.send(obj_json)
-                
-                response = await self.ws.recv()
+                '''
+                                response = await self.ws.recv()
                 json_recv = json.loads(response)
                 if "msg" in json_recv:
                     msg = json_recv["msg"]
@@ -68,7 +67,7 @@ class wsClient:
                         self.shutdown_state = True
                         exit()
                     #这里写服务器端发送过来的控制命令
-                    '''
+
                         elif msg == "600":
                         msg_re = {
                             "id": self.client_id,
@@ -76,7 +75,15 @@ class wsClient:
                         }
                         json_data = json.dumps(msg_re)
                         await self.ws.send(json_data)
-                    '''
+
+                '''
+                await asyncio.sleep(1)
+                if len(self.detection_queue) != 0:
+                    data = self.detection_queue.popleft()
+                    print(data)
+                    obj_converted = util.convert_numpy_types(data)
+                    obj_json = json.dumps(obj_converted)
+                    await self.ws.send(obj_json)
 
             except Exception as e:
                 print(e)
@@ -86,12 +93,13 @@ class wsClient:
     #影响
     async def data_collector(self):
         while True:
-            self.detection_queue = deque([])
             detections = self.tracker.get_current_detections()
             if len(detections) != 0:
-                print(f"\n当前帧检测到的对象({len(detections)}个):")
-                
+                #print(f"\n当前帧检测到的对象({len(detections)}个):")
+                #print(f"\n当前帧检测到的不重复对象({len(self.detection_queue)}个):")
                 for obj in detections:
+                    if len(self.detection_queue) == 0:
+                        self.detection_queue.append(obj)
                     # 检查当前对象的ID是否已经在队列中存在
                     if not any(existing_obj['id'] == obj['id'] for existing_obj in self.detection_queue):
                         self.detection_queue.append(obj)
